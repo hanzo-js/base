@@ -6,7 +6,8 @@ import { base } from '../dist/rest/index.js'
 function spy(answer = { body: '[]', status: 200, headers: {} }) {
   const seen = {}
   const fetch = async (url, init) => {
-    seen.url = new URL(url)
+    seen.raw = url
+    seen.url = new URL(url, 'http://relative.invalid')
     seen.method = init.method
     seen.headers = init.headers
     seen.body = init.body
@@ -146,4 +147,10 @@ test('nothing is sent until the query is awaited', async () => {
   assert.equal(seen.url, undefined, 'building a query must not issue a request')
   await q
   assert.ok(seen.url, 'awaiting it must')
+})
+
+test('a relative base addresses the same origin, which is what an app served beside Base needs', async () => {
+  const { seen, fetch } = spy()
+  await base('', undefined, { fetch }).from('posts').select().eq('id', '1')
+  assert.equal(seen.raw, '/rest/v1/posts?select=*&id=eq.1', 'a relative base must stay relative')
 })
