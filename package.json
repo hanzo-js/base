@@ -1,6 +1,6 @@
 {
   "name": "@hanzo/base",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Hanzo Base SDK - Reactive queries, CRDT, realtime, and Base-compatible client",
   "type": "module",
   "main": "./dist/core/index.js",
@@ -22,6 +22,10 @@
     "./crdt": {
       "import": "./dist/crdt/index.js",
       "types": "./dist/crdt/index.d.ts"
+    },
+    "./rest": {
+      "import": "./dist/rest/index.js",
+      "types": "./dist/rest/index.d.ts"
     }
   },
   "files": [
