@@ -80,15 +80,16 @@ export class Client {
  * and narrowed without anyone accidentally issuing a request by holding it.
  */
 export class Query implements PromiseLike<Result<Row[]>> {
-  #url: URL
+  #path: string
+  #params = new URLSearchParams()
   #options: Options
   #method: Method = 'GET'
   #body: unknown
   #headers: Record<string, string> = {}
   #wantCount = false
 
-  constructor(url: string, options: Options) {
-    this.#url = new URL(url)
+  constructor(path: string, options: Options) {
+    this.#path = path
     this.#options = options
   }
 
@@ -96,7 +97,7 @@ export class Query implements PromiseLike<Result<Row[]>> {
 
   /** Which columns to return. Omit or pass `*` for all of them. */
   select(columns = '*'): this {
-    this.#url.searchParams.set('select', columns)
+    this.#params.set('select', columns)
     // On a write, asking for columns is also asking for the rows back — the
     // server returns nothing unless told to, so saying select() means both.
     if (this.#method !== 'GET' && this.#method !== 'HEAD') {
@@ -108,14 +109,14 @@ export class Query implements PromiseLike<Result<Row[]>> {
   /** Sort. A bare column is ascending, as in SQL. */
   order(column: string, opts: { ascending?: boolean } = {}): this {
     const dir = opts.ascending === false ? 'desc' : 'asc'
-    const prior = this.#url.searchParams.get('order')
-    this.#url.searchParams.set('order', join(prior ?? undefined, `${column}.${dir}`, ','))
+    const prior = this.#params.get('order')
+    this.#params.set('order', join(prior ?? undefined, `${column}.${dir}`, ','))
     return this
   }
 
   /** How many rows at most. */
   limit(n: number): this {
-    this.#url.searchParams.set('limit', String(n))
+    this.#params.set('limit', String(n))
     return this
   }
 
@@ -125,8 +126,8 @@ export class Query implements PromiseLike<Result<Row[]>> {
    * shifted window returns real rows for a range nobody asked for.
    */
   range(from: number, to: number): this {
-    this.#url.searchParams.set('limit', String(to - from + 1))
-    this.#url.searchParams.set('offset', String(from))
+    this.#params.set('limit', String(to - from + 1))
+    this.#params.set('offset', String(from))
     return this
   }
 
@@ -172,7 +173,7 @@ export class Query implements PromiseLike<Result<Row[]>> {
 
   /** Negates any of the above: `.not('deleted', 'is', null)` is IS NOT NULL. */
   not(column: string, op: string, value: unknown): this {
-    this.#url.searchParams.append(column, `not.${op}.${stringify(value)}`)
+    this.#params.append(column, `not.${op}.${stringify(value)}`)
     return this
   }
 
@@ -214,7 +215,7 @@ export class Query implements PromiseLike<Result<Row[]>> {
   }
 
   #filter(column: string, op: string, value: unknown): this {
-    this.#url.searchParams.append(column, `${op}.${stringify(value)}`)
+    this.#params.append(column, `${op}.${stringify(value)}`)
     return this
   }
 
@@ -227,7 +228,8 @@ export class Query implements PromiseLike<Result<Row[]>> {
     if (this.#options.key) headers['Authorization'] = `Bearer ${this.#options.key}`
     if (this.#body !== undefined) headers['Content-Type'] = 'application/json'
 
-    const res = await send(this.#url.toString(), {
+    const query = this.#params.toString()
+    const res = await send(query ? `${this.#path}?${query}` : this.#path, {
       method: this.#method,
       headers,
       body: this.#body === undefined ? undefined : JSON.stringify(this.#body),
