@@ -137,7 +137,7 @@ test('a failure that is not a failure body still yields something readable', asy
 test('single asks for one row rather than an array', async () => {
   const { seen, fetch } = spy({ body: '{"id":"1"}', status: 200, headers: {} })
   const res = await base('https://db.example', 'k', { fetch }).from('posts').select().eq('id', '1').single()
-  assert.equal(seen.headers['Accept'], 'application/vnd.pgrst.object+json')
+  assert.equal(seen.headers['Accept'], 'application/vnd.hanzo.object+json')
   assert.equal(res.data.id, '1')
 })
 

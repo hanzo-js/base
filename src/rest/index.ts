@@ -162,7 +162,7 @@ export class Query implements PromiseLike<Result<Row[]>> {
     // The server does the narrowing: this Accept is a claim that the query hits
     // exactly one row, and it answers a bare object or refuses. There is nothing
     // for the client to remember afterwards.
-    this.#headers['Accept'] = 'application/vnd.pgrst.object+json'
+    this.#headers['Accept'] = 'application/vnd.hanzo.object+json'
     return this as unknown as PromiseLike<Result<Row>>
   }
 
