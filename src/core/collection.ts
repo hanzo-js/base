@@ -64,6 +64,7 @@ export class CollectionService {
   readonly collectionIdOrName: string
 
   private readonly _baseUrl: string
+  private readonly _prefix: string
   private readonly _getToken: () => string
   private readonly _setAuth: (token: string, record: BaseRecord) => void
   private readonly _store: QueryStore
@@ -76,9 +77,11 @@ export class CollectionService {
     setAuth: (token: string, record: BaseRecord) => void,
     store: QueryStore,
     realtime: RealtimeService,
+    prefix = '/v1',
   ) {
     this.collectionIdOrName = collectionIdOrName
     this._baseUrl = baseUrl.replace(/\/$/, '')
+    this._prefix = prefix
     this._getToken = getToken
     this._setAuth = setAuth
     this._store = store
@@ -379,7 +382,7 @@ export class CollectionService {
   // ---- Internal -----------------------------------------------------------
 
   private _collectionPath(): string {
-    return `/v1/collections/${encodeURIComponent(this.collectionIdOrName)}`
+    return `${this._prefix}/collections/${encodeURIComponent(this.collectionIdOrName)}`
   }
 
   private _applyOptions(params: URLSearchParams, options?: RecordQueryOptions): void {
