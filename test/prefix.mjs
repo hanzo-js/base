@@ -13,6 +13,7 @@
  */
 
 import { BaseClient, FileService } from '../dist/core/index.js'
+import { base as restBase } from '../dist/rest/index.js'
 
 let passed = 0
 let failed = 0
@@ -116,6 +117,22 @@ check(
   const seen = capturing()
   await c.list('posts')
   check('an empty prefix roots at the origin', seen[0], 'https://x.dev/collections/posts/records')
+}
+
+// The table wire takes the SAME knob, because it is the same fact: one prefix,
+// both entry points, spelled the way the server spells it.
+{
+  const seen = []
+  globalThis.fetch = async (url) => {
+    seen.push(String(url))
+    return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  await restBase('https://api.hanzo.ai', 'k').from('posts').select('*')
+  check('rest defaults to /v1', new URL(seen[0]).pathname, '/v1/rest/posts')
+
+  seen.length = 0
+  await restBase('https://api.hanzo.ai', 'k', { prefix: '/v1/base' }).from('posts').select('*')
+  check('rest honours a nested prefix', new URL(seen[0]).pathname, '/v1/base/rest/posts')
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`)

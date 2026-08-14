@@ -160,7 +160,7 @@ export interface ClientConfig {
 }
 
 /** Normalize an API prefix to a leading-slash, no-trailing-slash path fragment. */
-function normalizePrefix(prefix: string | undefined): string {
+export function normalizePrefix(prefix: string | undefined): string {
   const raw = (prefix ?? '/v1').trim().replace(/\/+$/, '')
   if (!raw) return ''
   return raw.startsWith('/') ? raw : `/${raw}`
