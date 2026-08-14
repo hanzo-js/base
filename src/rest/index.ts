@@ -1,9 +1,11 @@
+import { normalizePrefix } from '../core/client.js'
+
 /**
  * The table wire: @hanzo/base/rest.
  *
  * A sibling of the collection client rather than a replacement for it. That one
  * speaks Base's own /v1 surface — collections, records, realtime, CRDT. This one
- * speaks the /rest/v1 table wire the console's grid is built on, where a table is
+ * speaks the table wire the console's grid is built on, where a table is
  * the path and the filters are query params.
  *
  * One table per path, filters in the query string, rows as a bare array:
@@ -12,7 +14,7 @@
  *     const { data } = await db.from('posts').select('*').eq('status', 'live').limit(20)
  *
  * It has no dependencies and reaches nothing but `fetch`. The wire it speaks is
- * Base's `/rest/v1`, which the server implements in `apis/rest.go` — that file
+ * Base's `<prefix>/rest/{table}`, which the server implements in `apis/rest.go` — that file
  * is the contract, and every behaviour below is there rather than invented here.
  */
 
@@ -47,6 +49,18 @@ type Method = 'GET' | 'HEAD' | 'POST' | 'PATCH' | 'DELETE'
 export interface Options {
   /** Sent as the bearer. */
   key?: string
+  /**
+   * Where Base's API is rooted under the host. Default `/v1`.
+   *
+   * The same knob the collection client takes and the same one the server reads
+   * as BASE_API_PREFIX — one fact, spelled the same at both ends. A Base alone
+   * on its origin serves this wire at `/v1/rest/{table}`; a host that mounts
+   * several apps gives each a prefix, so Hanzo Cloud serves each org's at
+   * `/v1/base/rest/{table}`:
+   *
+   *     base('https://api.hanzo.ai', key, { prefix: '/v1/base' })
+   */
+  prefix?: string
   /** Swapped in tests, and in a runtime that carries its own fetch. */
   fetch?: typeof fetch
   /** Merged into every request. */
@@ -60,16 +74,21 @@ export function base(url: string, key?: string, options: Options = {}): Client {
 
 export class Client {
   readonly #url: string
+  readonly #prefix: string
   readonly #options: Options
 
   constructor(url: string, options: Options = {}) {
     this.#url = url.replace(/\/+$/, '')
+    this.#prefix = normalizePrefix(options.prefix)
     this.#options = options
   }
 
   /** Names the table a query runs against. */
   from(table: string): Query {
-    return new Query(`${this.#url}/rest/v1/${encodeURIComponent(table)}`, this.#options)
+    return new Query(
+      `${this.#url}${this.#prefix}/rest/${encodeURIComponent(table)}`,
+      this.#options,
+    )
   }
 }
 

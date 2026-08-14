@@ -24,7 +24,7 @@ function spy(answer = { body: '[]', status: 200, headers: {} }) {
 test('a table is one path, and the client adds the wire prefix', async () => {
   const { seen, fetch } = spy()
   await base('https://db.example', 'k', { fetch }).from('posts').select('*')
-  assert.equal(seen.url.pathname, '/rest/v1/posts')
+  assert.equal(seen.url.pathname, '/v1/rest/posts')
   assert.equal(seen.method, 'GET')
   assert.equal(seen.headers['Authorization'], 'Bearer k')
 })
@@ -32,7 +32,7 @@ test('a table is one path, and the client adds the wire prefix', async () => {
 test('a trailing slash on the host does not double up', async () => {
   const { seen, fetch } = spy()
   await base('https://db.example///', 'k', { fetch }).from('posts').select()
-  assert.equal(seen.url.pathname, '/rest/v1/posts')
+  assert.equal(seen.url.pathname, '/v1/rest/posts')
 })
 
 test('filters become query params the server can read', async () => {
@@ -152,5 +152,5 @@ test('nothing is sent until the query is awaited', async () => {
 test('a relative base addresses the same origin, which is what an app served beside Base needs', async () => {
   const { seen, fetch } = spy()
   await base('', undefined, { fetch }).from('posts').select().eq('id', '1')
-  assert.equal(seen.raw, '/rest/v1/posts?select=*&id=eq.1', 'a relative base must stay relative')
+  assert.equal(seen.raw, '/v1/rest/posts?select=*&id=eq.1', 'a relative base must stay relative')
 })
