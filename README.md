@@ -105,8 +105,8 @@ MIT © Hanzo AI, Inc. See [LICENSE](LICENSE).
 
 A sibling of the collection client, not a replacement. That one speaks Base's own
 `/v1` surface: collections, records, realtime, CRDT. This one speaks the
-`/rest/v1` table wire, where a table is the path and the filters are query
-params — the shape the console's data grid is built on.
+table wire at `<prefix>/rest/{table}`, where a table is the path and the filters
+are query params — the shape the console's data grid is built on.
 
 ```ts
 import { base } from '@hanzo/base/rest'
