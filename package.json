@@ -1,6 +1,10 @@
 {
   "name": "@hanzo/base",
   "version": "0.2.4",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
   "description": "Hanzo Base SDK - Reactive queries, CRDT, realtime, and Base-compatible client",
   "type": "module",
   "main": "./dist/core/index.js",
