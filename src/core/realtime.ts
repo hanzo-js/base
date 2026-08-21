@@ -36,6 +36,7 @@ interface Subscription {
 
 export class RealtimeService {
   private readonly _baseUrl: string
+  private readonly _prefix: string
   private readonly _getToken: () => string
 
   private _eventSource: EventSource | null = null
@@ -60,8 +61,9 @@ export class RealtimeService {
   /** Set to true when disconnect() is called explicitly. */
   private _intentionalDisconnect = false
 
-  constructor(baseUrl: string, getToken: () => string) {
+  constructor(baseUrl: string, getToken: () => string, prefix = '/v1') {
     this._baseUrl = baseUrl.replace(/\/$/, '')
+    this._prefix = prefix
     this._getToken = getToken
   }
 
@@ -157,7 +159,7 @@ export class RealtimeService {
     this._intentionalDisconnect = false
     this._setState('connecting')
 
-    const url = `${this._baseUrl}/v1/realtime`
+    const url = `${this._baseUrl}${this._prefix}/realtime`
     this._eventSource = new EventSource(url)
 
     this._eventSource.addEventListener('CONNECT', (e: MessageEvent) => {
@@ -240,7 +242,7 @@ export class RealtimeService {
 
     const token = this._getToken()
     try {
-      await fetch(`${this._baseUrl}/v1/realtime`, {
+      await fetch(`${this._baseUrl}${this._prefix}/realtime`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

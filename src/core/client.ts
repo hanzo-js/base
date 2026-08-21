@@ -98,9 +98,11 @@ export class MemoryAuthStore implements AuthStore {
 
 export class FileService {
   private readonly _baseUrl: string
+  private readonly _prefix: string
 
-  constructor(baseUrl: string) {
+  constructor(baseUrl: string, prefix = '/v1') {
     this._baseUrl = baseUrl.replace(/\/$/, '')
+    this._prefix = prefix
   }
 
   /**
@@ -112,8 +114,7 @@ export class FileService {
 
     const collectionId = (record.collectionId ?? record.collectionName ?? '') as string
     const parts = [
-      this._baseUrl,
-      'v1',
+      `${this._baseUrl}${this._prefix}`,
       'files',
       encodeURIComponent(collectionId),
       encodeURIComponent(record.id),
@@ -139,8 +140,30 @@ export class FileService {
 export interface ClientConfig {
   /** Base URL of the Hanzo Base instance (e.g. "https://myapp.hanzo.ai"). */
   url: string
+  /**
+   * Where this Base's API is rooted under `url`. Default `/v1`.
+   *
+   * This is the client half of the server's `BASE_API_PREFIX` — same knob, same
+   * default, same meaning — and it exists because a Base is not always alone on
+   * its origin. A host that mounts several apps gives each one a prefix so their
+   * routes cannot collide, and Base is told its own at router build; a client
+   * that assumed `/v1` could then only ever talk to a Base that had the origin
+   * to itself. Hanzo Cloud serves each org's Base at `/v1/base`, so:
+   *
+   *   base({ url: 'https://api.hanzo.ai', prefix: '/v1/base' })
+   *
+   * Leading slash optional, trailing slash ignored.
+   */
+  prefix?: string
   /** Optional external auth store. Defaults to in-memory store. */
   authStore?: AuthStore
+}
+
+/** Normalize an API prefix to a leading-slash, no-trailing-slash path fragment. */
+export function normalizePrefix(prefix: string | undefined): string {
+  const raw = (prefix ?? '/v1').trim().replace(/\/+$/, '')
+  if (!raw) return ''
+  return raw.startsWith('/') ? raw : `/${raw}`
 }
 
 export interface ListOptions {
@@ -166,6 +189,8 @@ export interface ListResult<T = BaseRecord> {
 
 export class BaseClient {
   readonly url: string
+  /** Where the API is rooted under `url` (see ClientConfig.prefix). */
+  readonly prefix: string
   readonly authStore: AuthStore
   readonly store: QueryStore
   readonly realtime: RealtimeService
@@ -186,10 +211,11 @@ export class BaseClient {
       typeof configOrUrl === 'string' ? { url: configOrUrl } : configOrUrl
 
     this.url = config.url.replace(/\/$/, '')
+    this.prefix = normalizePrefix(config.prefix)
     this.authStore = config.authStore ?? new MemoryAuthStore()
     this.store = new QueryStore()
-    this.realtime = new RealtimeService(this.url, () => this.authStore.token)
-    this.files = new FileService(this.url)
+    this.realtime = new RealtimeService(this.url, () => this.authStore.token, this.prefix)
+    this.files = new FileService(this.url, this.prefix)
     this._versionTracker = new VersionTracker()
 
     // Sync identity hash when auth changes.
@@ -213,6 +239,7 @@ export class BaseClient {
         (token, record) => this.authStore.save(token, record),
         this.store,
         this.realtime,
+        this.prefix,
       )
       this._collections.set(nameOrId, svc)
     }
@@ -269,7 +296,7 @@ export class BaseClient {
     if (options?.perPage) params.set('perPage', String(options.perPage))
 
     const qs = params.toString()
-    const path = `/v1/collections/${encodeURIComponent(collection)}/records${qs ? '?' + qs : ''}`
+    const path = `${this.prefix}/collections/${encodeURIComponent(collection)}/records${qs ? '?' + qs : ''}`
     const result = await this._request<ListResult>('GET', path)
 
     this.store.setQuery(collection, options?.filter ?? '', result.items)
@@ -281,26 +308,26 @@ export class BaseClient {
     if (options?.expand) params.set('expand', options.expand)
     if (options?.fields) params.set('fields', options.fields)
     const qs = params.toString()
-    const path = `/v1/collections/${encodeURIComponent(collection)}/records/${encodeURIComponent(id)}${qs ? '?' + qs : ''}`
+    const path = `${this.prefix}/collections/${encodeURIComponent(collection)}/records/${encodeURIComponent(id)}${qs ? '?' + qs : ''}`
     return this._request<BaseRecord>('GET', path)
   }
 
   async create(collection: string, data: Record<string, unknown>): Promise<BaseRecord> {
-    const path = `/v1/collections/${encodeURIComponent(collection)}/records`
+    const path = `${this.prefix}/collections/${encodeURIComponent(collection)}/records`
     const record = await this._request<BaseRecord>('POST', path, data)
     this.store.applyServerUpdate(collection, 'create', record)
     return record
   }
 
   async update(collection: string, id: string, data: Record<string, unknown>): Promise<BaseRecord> {
-    const path = `/v1/collections/${encodeURIComponent(collection)}/records/${encodeURIComponent(id)}`
+    const path = `${this.prefix}/collections/${encodeURIComponent(collection)}/records/${encodeURIComponent(id)}`
     const record = await this._request<BaseRecord>('PATCH', path, data)
     this.store.applyServerUpdate(collection, 'update', record)
     return record
   }
 
   async delete(collection: string, id: string): Promise<void> {
-    const path = `/v1/collections/${encodeURIComponent(collection)}/records/${encodeURIComponent(id)}`
+    const path = `${this.prefix}/collections/${encodeURIComponent(collection)}/records/${encodeURIComponent(id)}`
     await this._request<void>('DELETE', path)
     this.store.applyServerUpdate(collection, 'delete', { id } as BaseRecord)
   }
@@ -312,7 +339,7 @@ export class BaseClient {
     identity: string,
     password: string,
   ): Promise<{ token: string; record: BaseRecord }> {
-    const path = `/v1/collections/${encodeURIComponent(collection)}/auth-with-password`
+    const path = `${this.prefix}/collections/${encodeURIComponent(collection)}/auth-with-password`
     const result = await this._request<{ token: string; record: BaseRecord }>('POST', path, {
       identity,
       password,
@@ -329,7 +356,7 @@ export class BaseClient {
   }
 
   async refreshAuth(collection: string): Promise<{ token: string; record: BaseRecord }> {
-    const path = `/v1/collections/${encodeURIComponent(collection)}/auth-refresh`
+    const path = `${this.prefix}/collections/${encodeURIComponent(collection)}/auth-refresh`
     const result = await this._request<{ token: string; record: BaseRecord }>('POST', path)
     this.authStore.save(result.token, result.record)
     return result
@@ -391,7 +418,7 @@ export class BaseClient {
   // ---- Health check -------------------------------------------------------
 
   async health(): Promise<{ code: number; message: string }> {
-    return this.send('/v1/health')
+    return this.send(`${this.prefix}/health`)
   }
 
   // ---- Realtime convenience -----------------------------------------------
