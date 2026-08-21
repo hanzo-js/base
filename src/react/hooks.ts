@@ -411,7 +411,7 @@ export function useCRDT(documentId: string, wsUrl?: string): UseCRDTResult {
 
   // Connect on mount, disconnect on unmount.
   useEffect(() => {
-    const url = wsUrl ?? deriveCrdtWsUrl(client.url)
+    const url = wsUrl ?? deriveCrdtWsUrl(client.url, client.prefix)
     const token = client.authStore.token || undefined
 
     sync.connect(url, doc, token)
@@ -479,11 +479,11 @@ export function useCRDTCounter(doc: CRDTDocument, field: string): number {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Derive WebSocket URL from HTTP URL: https://x -> wss://x/v1/crdt */
-function deriveCrdtWsUrl(httpUrl: string): string {
+/** Derive the CRDT WebSocket URL from the client's HTTP origin + API prefix. */
+function deriveCrdtWsUrl(httpUrl: string, prefix = '/v1'): string {
   const url = httpUrl.replace(/\/$/, '')
   if (url.startsWith('https://')) {
-    return url.replace('https://', 'wss://') + '/v1/crdt'
+    return url.replace('https://', 'wss://') + prefix + '/crdt'
   }
-  return url.replace('http://', 'ws://') + '/v1/crdt'
+  return url.replace('http://', 'ws://') + prefix + '/crdt'
 }

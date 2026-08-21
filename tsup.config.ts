@@ -6,6 +6,7 @@ export default defineConfig({
     'compat/index': 'src/compat/index.ts',
     'react/index': 'src/react/index.ts',
     'crdt/index': 'src/crdt/index.ts',
+    'rest/index': 'src/rest/index.ts',
   },
   format: ['esm'],
   dts: true,

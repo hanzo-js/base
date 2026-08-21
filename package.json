@@ -1,6 +1,10 @@
 {
   "name": "@hanzo/base",
-  "version": "0.2.1",
+  "version": "0.2.7",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
   "description": "Hanzo Base SDK - Reactive queries, CRDT, realtime, and Base-compatible client",
   "type": "module",
   "main": "./dist/core/index.js",
@@ -22,6 +26,10 @@
     "./crdt": {
       "import": "./dist/crdt/index.js",
       "types": "./dist/crdt/index.d.ts"
+    },
+    "./rest": {
+      "import": "./dist/rest/index.js",
+      "types": "./dist/rest/index.d.ts"
     }
   },
   "files": [
@@ -32,7 +40,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node test/smoke.mjs",
+    "test": "npm run build && node test/smoke.mjs && node test/prefix.mjs && node --test test/rest.test.js",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run build"
   },

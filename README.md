@@ -100,3 +100,46 @@ npm test
 ## License
 
 MIT © Hanzo AI, Inc. See [LICENSE](LICENSE).
+
+## `@hanzo/base/rest` — the table wire
+
+A sibling of the collection client, not a replacement. That one speaks Base's own
+`/v1` surface: collections, records, realtime, CRDT. This one speaks the
+table wire at `<prefix>/rest/{table}`, where a table is the path and the filters
+are query params — the shape the console's data grid is built on.
+
+```ts
+import { base } from '@hanzo/base/rest'
+
+const db = base('https://base.example', key)
+
+const { data, count } = await db
+  .from('posts')
+  .select('id,title')
+  .eq('status', 'live')
+  .order('created', { ascending: false })
+  .limit(20)
+  .count()
+```
+
+Filters are `eq neq gt gte lt lte like ilike is in`, with `.not(column, op,
+value)` negating any of them. Writes are `.insert()`, `.update()` and
+`.delete()`, and return nothing unless `.select()` asks for the rows back.
+
+Three things worth knowing, because each is where a client usually gets it wrong:
+
+- **An unasked count is `null`, never `0`.** The server does not compute a total
+  unless asked, so reporting zero would be inventing an answer to a question
+  nobody put.
+- **A query sends nothing until it is awaited**, so a builder can be passed
+  around and narrowed without anyone issuing a request by holding one.
+- **`update` and `delete` require a filter.** They act on every row the filter
+  selects, and an unfiltered one would mean the whole table — the server refuses
+  it rather than applying it.
+
+Failures carry `{ message, details, hint, code }`. `code` is what to branch on:
+
+```ts
+const { error } = await db.from('posts').insert({ title })
+if (error?.code === '23505') return 'that title is taken'
+```
