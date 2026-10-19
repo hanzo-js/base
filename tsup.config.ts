@@ -9,7 +9,9 @@ export default defineConfig({
     'rest/index': 'src/rest/index.ts',
   },
   format: ['esm'],
-  dts: true,
+  // Declarations come from tsc (`npm run build`): TypeScript 7 is the native
+  // compiler and has no JavaScript API, which is what tsup's dts bundler drives.
+  dts: false,
   sourcemap: true,
   clean: true,
   splitting: true,

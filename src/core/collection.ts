@@ -1,8 +1,10 @@
 /**
- * CollectionService -- typed CRUD + auth + realtime for a single collection.
+ * CollectionService -- typed CRUD + realtime for a single collection.
  *
- * API-compatible with the upstream RecordService interface, extended with
- * reactive features (subscribe/unsubscribe, optimistic writes).
+ * API-compatible with the upstream RecordService interface for records,
+ * extended with reactive features (subscribe/unsubscribe, optimistic writes).
+ * Sign-in is Hanzo IAM's: a client holds the IAM-issued token in its auth
+ * store, and Base has no password, OAuth, verification or reset routes.
  */
 
 import type { BaseRecord } from './state.js'
@@ -43,19 +45,6 @@ export interface FileOptions {
   token?: string
 }
 
-export interface AuthResponse<T = BaseRecord> {
-  token: string
-  record: T
-}
-
-export interface OAuth2Options {
-  provider: string
-  code: string
-  codeVerifier: string
-  redirectUrl: string
-  createData?: Record<string, unknown>
-}
-
 // ---------------------------------------------------------------------------
 // CollectionService
 // ---------------------------------------------------------------------------
@@ -66,7 +55,6 @@ export class CollectionService {
   private readonly _baseUrl: string
   private readonly _prefix: string
   private readonly _getToken: () => string
-  private readonly _setAuth: (token: string, record: BaseRecord) => void
   private readonly _store: QueryStore
   private readonly _realtime: RealtimeService
 
@@ -74,7 +62,6 @@ export class CollectionService {
     collectionIdOrName: string,
     baseUrl: string,
     getToken: () => string,
-    setAuth: (token: string, record: BaseRecord) => void,
     store: QueryStore,
     realtime: RealtimeService,
     prefix = '/v1',
@@ -83,7 +70,6 @@ export class CollectionService {
     this._baseUrl = baseUrl.replace(/\/$/, '')
     this._prefix = prefix
     this._getToken = getToken
-    this._setAuth = setAuth
     this._store = store
     this._realtime = realtime
   }
@@ -276,107 +262,7 @@ export class CollectionService {
 
   /** Unsubscribe from a specific topic or all topics for this collection. */
   unsubscribe(topic?: string): void {
-    this._realtime.unsubscribe(
-      topic ? `${this.collectionIdOrName}/${topic}` : this.collectionIdOrName,
-    )
-  }
-
-  // ---- Auth methods (for auth collections) --------------------------------
-
-  async authWithPassword<T extends BaseRecord = BaseRecord>(
-    identity: string,
-    password: string,
-    options?: RecordQueryOptions,
-  ): Promise<AuthResponse<T>> {
-    const params = new URLSearchParams()
-    this._applyOptions(params, options)
-    const qs = params.toString()
-    const path = `${this._collectionPath()}/auth-with-password${qs ? '?' + qs : ''}`
-
-    const result = await this._request<AuthResponse<T>>(
-      'POST',
-      path,
-      JSON.stringify({ identity, password }),
-      options,
-      'application/json',
-    )
-
-    this._setAuth(result.token, result.record as unknown as BaseRecord)
-    return result
-  }
-
-  async authWithOAuth2<T extends BaseRecord = BaseRecord>(
-    oauthOptions: OAuth2Options,
-    options?: RecordQueryOptions,
-  ): Promise<AuthResponse<T>> {
-    const params = new URLSearchParams()
-    this._applyOptions(params, options)
-    const qs = params.toString()
-    const path = `${this._collectionPath()}/auth-with-oauth2${qs ? '?' + qs : ''}`
-
-    const result = await this._request<AuthResponse<T>>(
-      'POST',
-      path,
-      JSON.stringify(oauthOptions),
-      options,
-      'application/json',
-    )
-
-    this._setAuth(result.token, result.record as unknown as BaseRecord)
-    return result
-  }
-
-  async requestVerification(email: string, options?: RecordQueryOptions): Promise<boolean> {
-    const path = `${this._collectionPath()}/request-verification`
-    await this._request<void>(
-      'POST',
-      path,
-      JSON.stringify({ email }),
-      options,
-      'application/json',
-    )
-    return true
-  }
-
-  async confirmVerification(token: string, options?: RecordQueryOptions): Promise<boolean> {
-    const path = `${this._collectionPath()}/confirm-verification`
-    await this._request<void>(
-      'POST',
-      path,
-      JSON.stringify({ token }),
-      options,
-      'application/json',
-    )
-    return true
-  }
-
-  async requestPasswordReset(email: string, options?: RecordQueryOptions): Promise<boolean> {
-    const path = `${this._collectionPath()}/request-password-reset`
-    await this._request<void>(
-      'POST',
-      path,
-      JSON.stringify({ email }),
-      options,
-      'application/json',
-    )
-    return true
-  }
-
-  async confirmPasswordReset(
-    token: string,
-    password: string,
-    passwordConfirm: string,
-    options?: RecordQueryOptions,
-  ): Promise<boolean> {
-    const path = `${this._collectionPath()}/confirm-password-reset`
-    await this._request<void>(
-      'POST',
-      path,
-      JSON.stringify({ token, password, passwordConfirm }),
-      options,
-      'application/json',
-    )
-    return true
+    this._realtime.unsubscribe(this.collectionIdOrName, topic)
   }
 
   // ---- Internal -----------------------------------------------------------

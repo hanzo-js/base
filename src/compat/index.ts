@@ -40,8 +40,6 @@ export type {
   RecordQueryOptions,
   RecordFullListOptions,
   FileOptions,
-  AuthResponse,
-  OAuth2Options,
   ClientResponseErrorData,
   CookieSerializeOptions,
 } from '../core/index.js'

@@ -1,8 +1,23 @@
 /**
  * RealtimeService -- SSE-based subscription manager.
  *
+ * The stream is opened the way Base serves it:
+ *
+ *   1. POST {prefix}/realtime/token with the caller's credential mints a grant,
+ *      good once and for thirty seconds (an EventSource cannot send a header,
+ *      and a credential never travels in a query string);
+ *   2. GET  {prefix}/realtime?token=<grant> opens the stream, which answers
+ *      CONNECT with the client id;
+ *   3. POST {prefix}/realtime {clientId, subscriptions} with the credential
+ *      says which topics the stream carries.
+ *
+ * Base names each event after the subscription it answers ("people/*",
+ * "people/RECORD_ID"), so a subscription listens for its own name. Every
+ * (re)connect mints a fresh grant. With no credential the stream opens without
+ * one and carries what an anonymous caller may read.
+ *
  * Features:
- * - Query deduplication via hash(collection+topic) with reference counting
+ * - Subscription deduplication by topic with reference counting
  * - Auto-reconnect with exponential backoff
  * - Max observed timestamp tracking
  * - Connection state notifications
@@ -25,9 +40,13 @@ export type RealtimeCallback = (event: RealtimeEvent) => void
 export type ConnectionCallback = (state: ConnectionState) => void
 
 interface Subscription {
+  /** The topic as Base names it, which is also the event's name. */
+  name: string
   collection: string
   topic: string
   callbacks: Set<RealtimeCallback>
+  /** The listener bound on the current stream, if one is open. */
+  listener: ((e: MessageEvent) => void) | null
 }
 
 // ---------------------------------------------------------------------------
@@ -43,11 +62,17 @@ export class RealtimeService {
   private _state: ConnectionState = 'disconnected'
   private _connectionListeners = new Set<ConnectionCallback>()
 
-  /** Dedup map: hash -> Subscription. */
+  /** Subscriptions by topic name. */
   private _subscriptions = new Map<string, Subscription>()
 
   /** SSE client id assigned by the server on connect. */
   private _clientId: string | null = null
+
+  /**
+   * Counts connection attempts, so an attempt that is still minting its grant
+   * when a newer one starts (or disconnect() is called) knows it was superseded.
+   */
+  private _attempt = 0
 
   /** Reconnect state. */
   private _reconnectAttempts = 0
@@ -88,47 +113,44 @@ export class RealtimeService {
     topic: string,
     callback: RealtimeCallback,
   ): () => void {
-    const hash = this._hash(collection, topic)
-    let sub = this._subscriptions.get(hash)
+    const name = `${collection}/${topic}`
+    let sub = this._subscriptions.get(name)
+    const added = !sub
 
     if (!sub) {
-      sub = { collection, topic, callbacks: new Set() }
-      this._subscriptions.set(hash, sub)
+      sub = { name, collection, topic, callbacks: new Set(), listener: null }
+      this._subscriptions.set(name, sub)
+      this._listen(sub)
     }
     sub.callbacks.add(callback)
 
-    // If this is the first subscription, connect.
-    if (this._subscriptions.size === 1 && !this._eventSource) {
+    if (!this._eventSource && this._state === 'disconnected') {
       this._connect()
-    } else if (this._clientId) {
-      // Already connected -- submit this subscription to the server.
-      this._submitSubscriptions()
+    } else if (added && this._clientId) {
+      // Already connected -- the server needs the new topic.
+      void this._submitSubscriptions()
     }
 
     return () => {
       sub!.callbacks.delete(callback)
-      if (sub!.callbacks.size === 0) {
-        this._subscriptions.delete(hash)
-        if (this._clientId) {
-          this._submitSubscriptions()
-        }
-      }
-      // If no subscriptions remain, disconnect.
-      if (this._subscriptions.size === 0) {
-        this.disconnect()
+      if (sub!.callbacks.size === 0 && this._subscriptions.get(name) === sub) {
+        this._drop([sub!])
       }
     }
   }
 
-  /** Remove all subscribers for a topic, or all topics if none specified. */
-  unsubscribe(topic?: string): void {
-    if (topic) {
-      this._subscriptions.delete(topic)
-    } else {
-      this._subscriptions.clear()
-    }
-    if (this._subscriptions.size === 0) {
-      this.disconnect()
+  /**
+   * Remove every subscriber of a collection, or of one of its topics, or of
+   * every collection when called with nothing.
+   */
+  unsubscribe(collection?: string, topic?: string): void {
+    const dropped = [...this._subscriptions.values()].filter(
+      (s) =>
+        collection === undefined ||
+        (s.collection === collection && (topic === undefined || s.topic === topic)),
+    )
+    if (dropped.length > 0) {
+      this._drop(dropped)
     }
   }
 
@@ -143,58 +165,131 @@ export class RealtimeService {
   /** Explicitly disconnect. */
   disconnect(): void {
     this._intentionalDisconnect = true
+    this._attempt++
     this._clearReconnect()
-    if (this._eventSource) {
-      this._eventSource.close()
-      this._eventSource = null
-    }
-    this._clientId = null
+    this._closeStream()
     this._setState('disconnected')
   }
 
   // ---- Connection ---------------------------------------------------------
 
   private _connect(): void {
-    if (this._eventSource) return
+    if (this._eventSource || this._state === 'connecting') return
+    this._clearReconnect()
     this._intentionalDisconnect = false
     this._setState('connecting')
 
-    const url = `${this._baseUrl}${this._prefix}/realtime`
-    this._eventSource = new EventSource(url)
+    const attempt = ++this._attempt
+    void this._open(attempt)
+  }
 
-    this._eventSource.addEventListener('CONNECT', (e: MessageEvent) => {
+  private async _open(attempt: number): Promise<void> {
+    let url = `${this._baseUrl}${this._prefix}/realtime`
+
+    const token = this._getToken()
+    if (token) {
+      let grant: string
+      try {
+        grant = await this._grant(token)
+      } catch {
+        if (attempt === this._attempt) this._failed()
+        return
+      }
+      // superseded while the grant was being minted
+      if (attempt !== this._attempt) return
+      url += `?token=${encodeURIComponent(grant)}`
+    }
+
+    const es = new EventSource(url)
+    this._eventSource = es
+
+    es.addEventListener('CONNECT', (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data) as { clientId: string }
         this._clientId = data.clientId
         this._reconnectAttempts = 0
         this._setState('connected')
-        this._submitSubscriptions()
+        void this._submitSubscriptions()
       } catch {
         // malformed connect event
       }
     })
 
-    // Listen for all SSE events. The server sends events named after
-    // the collection, e.g. event: "posts".
-    this._eventSource.onmessage = (e: MessageEvent) => {
-      this._handleMessage(e)
+    for (const sub of this._subscriptions.values()) {
+      this._listen(sub)
     }
 
-    // The server sends named events for each collection.
-    // We use the generic handler plus specific ones registered dynamically.
-    this._eventSource.onerror = () => {
-      this._eventSource?.close()
-      this._eventSource = null
-      this._clientId = null
-      this._setState('disconnected')
-
-      if (!this._intentionalDisconnect) {
-        this._scheduleReconnect()
-      }
+    es.onerror = () => {
+      if (this._eventSource === es) this._failed()
     }
   }
 
-  private _handleMessage(e: MessageEvent): void {
+  /** Mint the grant a stream is opened with. */
+  private async _grant(token: string): Promise<string> {
+    const res = await fetch(`${this._baseUrl}${this._prefix}/realtime/token`, {
+      method: 'POST',
+      headers: { Authorization: token },
+    })
+    if (!res.ok) {
+      throw new Error(`realtime grant refused: ${res.status}`)
+    }
+    const body = (await res.json()) as { token?: string }
+    if (!body.token) {
+      throw new Error('realtime grant missing from the answer')
+    }
+    return body.token
+  }
+
+  /** The stream failed or was refused: close it and try again later. */
+  private _failed(): void {
+    this._closeStream()
+    this._setState('disconnected')
+    if (!this._intentionalDisconnect && this._subscriptions.size > 0) {
+      this._scheduleReconnect()
+    }
+  }
+
+  private _closeStream(): void {
+    const es = this._eventSource
+    this._eventSource = null
+    this._clientId = null
+    if (!es) return
+    for (const sub of this._subscriptions.values()) {
+      if (sub.listener) {
+        es.removeEventListener(sub.name, sub.listener as EventListener)
+        sub.listener = null
+      }
+    }
+    es.close()
+  }
+
+  /** Bind a subscription's event on the open stream, once. */
+  private _listen(sub: Subscription): void {
+    const es = this._eventSource
+    if (!es || sub.listener) return
+    sub.listener = (e: MessageEvent) => this._deliver(sub, e)
+    es.addEventListener(sub.name, sub.listener as EventListener)
+  }
+
+  /** Remove subscriptions, and tell the server, or close an idle stream. */
+  private _drop(subs: Subscription[]): void {
+    const es = this._eventSource
+    for (const sub of subs) {
+      if (es && sub.listener) {
+        es.removeEventListener(sub.name, sub.listener as EventListener)
+      }
+      sub.listener = null
+      this._subscriptions.delete(sub.name)
+    }
+
+    if (this._subscriptions.size === 0) {
+      this.disconnect()
+    } else if (this._clientId) {
+      void this._submitSubscriptions()
+    }
+  }
+
+  private _deliver(sub: Subscription, e: MessageEvent): void {
     let payload: { action: string; record: BaseRecord }
     try {
       payload = JSON.parse(e.data)
@@ -215,18 +310,12 @@ export class RealtimeService {
       }
     }
 
-    // Fan out to matching subscriptions.
-    const collectionName = record.collectionName ?? ''
-    for (const sub of this._subscriptions.values()) {
-      if (sub.collection !== collectionName) continue
-      if (sub.topic !== '*' && sub.topic !== record.id) continue
-      const event: RealtimeEvent = { action, record }
-      for (const cb of sub.callbacks) {
-        try {
-          cb(event)
-        } catch {
-          // subscriber errors must not break fanout
-        }
+    const event: RealtimeEvent = { action, record }
+    for (const cb of sub.callbacks) {
+      try {
+        cb(event)
+      } catch {
+        // subscriber errors must not break fanout
       }
     }
   }
@@ -234,11 +323,6 @@ export class RealtimeService {
   /** Submit current subscription set to the server via POST. */
   private async _submitSubscriptions(): Promise<void> {
     if (!this._clientId) return
-
-    const topics: string[] = []
-    for (const sub of this._subscriptions.values()) {
-      topics.push(`${sub.collection}/${sub.topic}`)
-    }
 
     const token = this._getToken()
     try {
@@ -250,7 +334,7 @@ export class RealtimeService {
         },
         body: JSON.stringify({
           clientId: this._clientId,
-          subscriptions: topics,
+          subscriptions: [...this._subscriptions.keys()],
         }),
       })
     } catch {
@@ -295,11 +379,5 @@ export class RealtimeService {
         // listener errors must not break notification
       }
     }
-  }
-
-  // ---- Helpers ------------------------------------------------------------
-
-  private _hash(collection: string, topic: string): string {
-    return `${collection}::${topic}`
   }
 }

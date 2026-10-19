@@ -27,12 +27,15 @@ const base = new BaseClient('https://base.hanzo.ai')
 
 ## Auth (Hanzo IAM)
 
+Sign-in is Hanzo IAM's (PKCE in a browser, a key or client credentials on a
+server). Base has no password, OAuth, verification or reset routes of its own, so
+the client is handed the IAM-issued token and carries it on every request:
+
 ```ts
-await base.collection('users').authWithPassword('me@example.com', 'secret')
+base.authStore.save(iamAccessToken, null)
 
 base.authStore.isValid   // JWT present and unexpired
 base.authStore.token     // the IAM JWT
-base.authStore.record    // the authenticated record
 
 base.signOut()
 ```
@@ -70,6 +73,17 @@ const off = base.collection('posts').subscribe('*', (e) => {
   console.log(e.action, e.record) // 'create' | 'update' | 'delete'
 })
 off()
+```
+
+An `EventSource` cannot send a header and the token never travels in a query
+string, so the stream is opened with a grant: the client POSTs
+`<prefix>/realtime/token` with the token, opens `<prefix>/realtime?token=<grant>`
+with what comes back, and mints a new grant on every reconnect. Collection rules
+decide which events reach the stream. On Hanzo Cloud an org's Base is at
+`/v1/base`:
+
+```ts
+const base = new BaseClient({ url: 'https://api.hanzo.ai', prefix: '/v1/base' })
 ```
 
 ## Files

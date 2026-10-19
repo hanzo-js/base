@@ -236,7 +236,6 @@ export class BaseClient {
         nameOrId,
         this.url,
         () => this.authStore.token,
-        (token, record) => this.authStore.save(token, record),
         this.store,
         this.realtime,
         this.prefix,
@@ -333,27 +332,10 @@ export class BaseClient {
   }
 
   // ---- Auth (direct convenience) ------------------------------------------
-
-  async signInWithPassword(
-    collection: string,
-    identity: string,
-    password: string,
-  ): Promise<{ token: string; record: BaseRecord }> {
-    const path = `${this.prefix}/collections/${encodeURIComponent(collection)}/auth-with-password`
-    const result = await this._request<{ token: string; record: BaseRecord }>('POST', path, {
-      identity,
-      password,
-    })
-    this.authStore.save(result.token, result.record)
-    return result
-  }
-
-  async signUp(
-    collection: string,
-    data: Record<string, unknown>,
-  ): Promise<BaseRecord> {
-    return this.create(collection, data)
-  }
+  //
+  // Sign-in is Hanzo IAM's. Base has no password, OAuth, verification or reset
+  // routes; a client holds the IAM-issued token in its auth store
+  // (`authStore.save(token, record)`) and every request carries it.
 
   async refreshAuth(collection: string): Promise<{ token: string; record: BaseRecord }> {
     const path = `${this.prefix}/collections/${encodeURIComponent(collection)}/auth-refresh`

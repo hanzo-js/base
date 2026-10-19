@@ -17,8 +17,6 @@ export type {
   RecordQueryOptions,
   RecordFullListOptions,
   FileOptions,
-  AuthResponse,
-  OAuth2Options,
   ClientResponseErrorData,
 } from './collection.js'
 

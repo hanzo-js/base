@@ -1,6 +1,6 @@
 {
   "name": "@hanzo/base",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
     "access": "public"
@@ -37,10 +37,10 @@
     "src"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && tsc --emitDeclarationOnly",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node test/smoke.mjs && node test/prefix.mjs && node --test test/rest.test.js",
+    "test": "npm run build && node test/smoke.mjs && node test/prefix.mjs && node --test test/rest.test.js test/realtime.test.js",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run build"
   },

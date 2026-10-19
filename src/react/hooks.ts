@@ -216,8 +216,6 @@ export interface UseAuthResult {
   user: BaseRecord | null
   token: string
   isValid: boolean
-  signIn: (identity: string, password: string) => Promise<void>
-  signUp: (data: Record<string, unknown>) => Promise<BaseRecord>
   signOut: () => void
   /** Subscribe to auth changes. Returns unsubscribe. */
   onChange: AuthStore['onChange']
@@ -226,12 +224,12 @@ export interface UseAuthResult {
 /**
  * Auth state hook.
  *
- * Returns the current auth state and provides sign-in, sign-up, and
- * sign-out methods. Re-renders when auth state changes.
- *
- * @param collection - Auth collection name (default: "users").
+ * Returns the current auth state and re-renders when it changes. Sign-in is
+ * Hanzo IAM's: whatever completes it saves the IAM token into the client's auth
+ * store (`client.authStore.save(token, record)`), and this hook follows that
+ * store.
  */
-export function useAuth(collection = 'users'): UseAuthResult {
+export function useAuth(): UseAuthResult {
   const client = useBase()
   const [user, setUser] = useState<BaseRecord | null>(client.authStore.record)
   const [token, setToken] = useState(client.authStore.token)
@@ -244,20 +242,6 @@ export function useAuth(collection = 'users'): UseAuthResult {
     return unsubscribe
   }, [client])
 
-  const signIn = useCallback(
-    async (identity: string, password: string) => {
-      await client.signInWithPassword(collection, identity, password)
-    },
-    [client, collection],
-  )
-
-  const signUp = useCallback(
-    async (data: Record<string, unknown>) => {
-      return client.signUp(collection, data)
-    },
-    [client, collection],
-  )
-
   const signOut = useCallback(() => {
     client.signOut()
   }, [client])
@@ -266,8 +250,6 @@ export function useAuth(collection = 'users'): UseAuthResult {
     user,
     token,
     isValid: client.authStore.isValid,
-    signIn,
-    signUp,
     signOut,
     onChange: client.authStore.onChange.bind(client.authStore),
   }
