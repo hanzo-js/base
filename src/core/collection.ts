@@ -10,6 +10,7 @@
 import type { BaseRecord } from './state.js'
 import type { QueryStore } from './store.js'
 import type { RealtimeService, RealtimeCallback } from './realtime.js'
+import { authorization } from './tokens.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -298,7 +299,7 @@ export class CollectionService {
       ...(options?.headers ?? {}),
     }
     if (token) {
-      headers['Authorization'] = token
+      headers['Authorization'] = authorization(token)
     }
     if (contentType) {
       headers['Content-Type'] = contentType

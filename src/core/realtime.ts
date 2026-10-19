@@ -24,6 +24,7 @@
  */
 
 import type { BaseRecord } from './state.js'
+import { authorization } from './tokens.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -228,7 +229,7 @@ export class RealtimeService {
   private async _grant(token: string): Promise<string> {
     const res = await fetch(`${this._baseUrl}${this._prefix}/realtime/token`, {
       method: 'POST',
-      headers: { Authorization: token },
+      headers: { Authorization: authorization(token) },
     })
     if (!res.ok) {
       throw new Error(`realtime grant refused: ${res.status}`)
@@ -330,7 +331,7 @@ export class RealtimeService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: token } : {}),
+          ...(token ? { Authorization: authorization(token) } : {}),
         },
         body: JSON.stringify({
           clientId: this._clientId,

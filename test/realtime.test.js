@@ -92,7 +92,7 @@ test('the stream is opened with a grant minted by an authenticated POST', async 
 
   assert.equal(calls[0].path, '/v1/base/realtime/token')
   assert.equal(calls[0].method, 'POST')
-  assert.equal(calls[0].auth, 'iam-jwt')
+  assert.equal(calls[0].auth, 'Bearer iam-jwt')
 
   assert.equal(FakeEventSource.opened.length, 1)
   const es = FakeEventSource.opened[0]
@@ -112,7 +112,7 @@ test('CONNECT submits the subscriptions with the credential', async () => {
 
   const post = calls.find((c) => c.path === '/v1/base/realtime' && c.method === 'POST')
   assert.ok(post, 'subscriptions were submitted')
-  assert.equal(post.auth, 'iam-jwt')
+  assert.equal(post.auth, 'Bearer iam-jwt')
   assert.deepEqual(post.body, { clientId: 'c1', subscriptions: ['people/*', 'companies/rec1'] })
   assert.equal(client.realtime.state, 'connected')
   client.disconnect()

@@ -137,3 +137,12 @@ export function normalizeUnknownQueryParams(
   }
   return out
 }
+
+/**
+ * The Authorization header value for a credential. A bare token goes as a
+ * Bearer token, which is what Hanzo's edge reads a principal from; a value that
+ * already names its scheme ("Bearer …") goes as it is.
+ */
+export function authorization(token: string): string {
+  return /^\S+\s/.test(token) ? token : `Bearer ${token}`
+}

@@ -14,6 +14,7 @@ import { VersionTracker } from './state.js'
 import { QueryStore } from './store.js'
 import { RealtimeService, type RealtimeEvent } from './realtime.js'
 import { CollectionService, type FileOptions } from './collection.js'
+import { authorization } from './tokens.js'
 
 // ---------------------------------------------------------------------------
 // AuthStore
@@ -257,7 +258,7 @@ export class BaseClient {
   private _headers(): Record<string, string> {
     const h: Record<string, string> = { 'Content-Type': 'application/json' }
     if (this.authStore.token) {
-      h['Authorization'] = this.authStore.token
+      h['Authorization'] = authorization(this.authStore.token)
     }
     return h
   }
@@ -374,7 +375,7 @@ export class BaseClient {
 
     const headers: Record<string, string> = { ...options.headers }
     if (this.authStore.token) {
-      headers['Authorization'] = this.authStore.token
+      headers['Authorization'] = authorization(this.authStore.token)
     }
 
     const response = await fetch(url, {
