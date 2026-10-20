@@ -1,22 +1,138 @@
-name: publish
-
-# Publishes @hanzo/base to npm when a version tag is pushed.
-# Requires the NPM_TOKEN secret. Dormant until the first tag.
+name: Publish
+# Publishing follows a push to main. package.json holds the version, and the
+# receipt is what registry.npmjs.org serves — not what `npm publish` printed.
+#
+# No `paths:` filter, deliberately. The question is "does the registry serve
+# something older than this tree?", and the comparison below is the only
+# thing that reads the truth. A path gate guesses it from the shape of a
+# diff, so a lockfile-only fix to a failed release matches no path and
+# cannot re-run the job it repaired.
 on:
   push:
-    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+    branches: [main]
+  workflow_dispatch:
+
+# Serialized, newest wins. Two runs in flight both read the registry before
+# either writes to it, so both believe the same version is unpublished and
+# the slower one ships a stale tree under a number the faster one already
+# defined.
+concurrency:
+  group: publish
+  cancel-in-progress: true
 
 jobs:
   publish:
     runs-on: hanzo-build-linux-amd64
+    env:
+      # The repo's own .npmrc sends installs to the fleet mirror, and a
+      # project .npmrc outranks anything setup-node writes. One variable
+      # covers view, publish and the read-back with the real registry.
+      npm_config_registry: https://registry.npmjs.org
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
-      - run: npm install
+          registry-url: ${{ env.npm_config_registry }}
+
+      # `npm ci`, not `npm install`: the lockfile is committed, and a release
+      # that silently resolves a different axios than the gate did is not
+      # the thing that was gated.
+      - run: npm ci --no-audit --no-fund
+
+      # There's no test script — `build` is both halves (CJS + the
+      # bundler-facing ESM) and the only thing that type-checks the whole
+      # generated tree, so it's the gate. It runs before the version becomes
+      # immutable rather than after: a broken `dist/` published under a real
+      # version cannot be taken back, only superseded.
       - run: npm run build
-      - run: npm publish --access public
+
+      - name: Read the version to publish
+        id: what
+        run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+
+      - name: Ahead of the registry?
+        id: ahead
+        # FORWARD ONLY. A push that doesn't raise package.json's version past
+        # what npm already serves is not a release, so nothing below this
+        # step runs. Reading the registry rather than diffing the previous
+        # commit also survives a merge whose first parent already carries
+        # the bump.
+        run: |
+          set -euo pipefail
+          NEW='${{ steps.what.outputs.version }}'
+          OLD=$(npm view @hanzo/base version 2>/dev/null || echo "0.0.0")
+          NEWEST=$(printf '%s\n%s\n' "$OLD" "$NEW" | sort -V | tail -1)
+          if [ "$OLD" = "$NEW" ] || [ "$NEWEST" != "$NEW" ]; then
+            echo "registry serves $OLD; tree is $NEW — nothing to publish."
+            echo "yes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "yes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pack
+        if: steps.ahead.outputs.yes == 'true'
+        id: pack
+        # `npm pack` is byte-reproducible — it normalises mtimes — so the
+        # tarball digest is a stable identity for "this tree at this
+        # version", which is what the verification step below checks.
+        run: echo "integrity=$(npm pack --json | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8"))[0].integrity')" >> "$GITHUB_OUTPUT"
+
+      - name: Load the publish credential from KMS
+        if: steps.ahead.outputs.yes == 'true'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          KMS_CLIENT_ID: ${{ secrets.KMS_CLIENT_ID }}
+          KMS_CLIENT_SECRET: ${{ secrets.KMS_CLIENT_SECRET }}
+        run: |
+          # Only the KMS machine identity lives as a Hanzo Git secret; a raw
+          # NPM_TOKEN beside it would be a second place to hold one thing —
+          # and the one that rots silently, since npm answers an
+          # unauthorised publish with 404 on PUT, not 401.
+          if [ -z "$KMS_CLIENT_ID" ] || [ -z "$KMS_CLIENT_SECRET" ]; then
+            echo "::error::KMS machine identity absent — cannot pull the npm credential. Seed KMS_CLIENT_ID/KMS_CLIENT_SECRET as git.hanzo.ai Actions secrets (org or repo scope)." >&2
+            exit 1
+          fi
+          KMS=https://kms.hanzo.ai; ENVN=prod
+          TOKEN=$(curl -sf "$KMS/v1/kms/auth/login" -H 'Content-Type: application/json' \
+            -d "{\"clientId\":\"$KMS_CLIENT_ID\",\"clientSecret\":\"$KMS_CLIENT_SECRET\"}" | jq -r .accessToken)
+          [ -n "$TOKEN" ] && [ "$TOKEN" != null ] || { echo "::error::KMS login failed"; exit 1; }
+          # The org is the token's owner claim, not a path segment, so the
+          # read names only the secret: /v1/kms/secrets/<name>?env=<env>.
+          URL="$KMS/v1/kms/secrets/NPM_TOKEN?env=$ENVN"
+          # No -f: under `bash -e -o pipefail` a `curl -sf` on a 404 exits 22
+          # and kills the step before any message of ours prints, which reads
+          # like a broken network. Capture the status and say it.
+          BODY=$(curl -s -w '\n%{http_code}' "$URL" -H "Authorization: Bearer $TOKEN") || true
+          CODE=$(printf '%s' "$BODY" | tail -1)
+          VAL=$(printf '%s' "$BODY" | sed '$d' | jq -r '.value // empty' 2>/dev/null || true)
+          if [ -z "$VAL" ]; then
+            echo "::error::KMS returned HTTP $CODE for $URL with no value — seed NPM_TOKEN there, not as Hanzo Git secret." >&2
+            exit 1
+          fi
+          echo "::add-mask::$VAL"
+          echo "NODE_AUTH_TOKEN=$VAL" >> "$GITHUB_ENV"
+
+      - name: Publish
+        if: steps.ahead.outputs.yes == 'true'
+        run: npm publish --access public
+
+      - name: Prove it from outside
+        if: steps.ahead.outputs.yes == 'true'
+        # No amount of a green `npm publish` step is the receipt — only the
+        # registry serving the digest this job packed is. hanzoai/extension
+        # lost a version exactly this way once: tagged and "successful"
+        # while npm stayed put.
+        run: |
+          set -euo pipefail
+          VERSION='${{ steps.what.outputs.version }}'
+          for _ in $(seq 1 30); do
+            THEIRS="$(npm view "@hanzo/base@$VERSION" dist.integrity 2>/dev/null || true)"
+            if [ "$THEIRS" = '${{ steps.pack.outputs.integrity }}' ]; then
+              echo "npm serves @hanzo/base $VERSION at $THEIRS"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::npm never served @hanzo/base $VERSION with our digest"
+          exit 1
